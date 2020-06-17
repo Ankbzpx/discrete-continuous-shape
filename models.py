@@ -66,12 +66,10 @@ class BottleNect3D(nn.Module):
 
     
 class Discrete_decoder(nn.Module):
-    def __init__(self, hidden_dim = 128):
+    def __init__(self, hidden_dim = 256):
         super(Discrete_decoder, self).__init__()
         
         self.decoder = nn.ModuleList([])
-        self.decoder.append(nn.Conv3d(in_channels = 256, out_channels = 256, kernel_size = 1, stride=1, padding=0))
-        self.decoder.append(nn.BatchNorm3d(256))
         self.decoder.append(nn.ConvTranspose3d(in_channels = 256, out_channels = 128, kernel_size = 4, stride=2, padding=1))
         self.decoder.append(nn.BatchNorm3d(128))
         self.decoder.append(BottleNect3D(128))
@@ -124,55 +122,64 @@ class BottleNect1D(nn.Module):
     def forward(self, x):
         return x + self.block(x)
 
+class BottleNect1D(nn.Module):
+    def __init__(self, input_dim, expand = 5):
+        super(BottleNect1D, self).__init__()
+        
+        self.block = nn.Sequential(
+            nn.Linear(input_dim, expand*input_dim),
+            nn.BatchNorm1d(expand*input_dim),
+            nn.ReLU(),
+            nn.Linear(expand*input_dim, input_dim),
+            nn.BatchNorm1d(input_dim),
+        )
+    
+    def forward(self, x):
+        return x + self.block(x)
+
 class Continuous(nn.Module):
     def __init__(self, pt_dim = 3, con_dim = 32, latent_dim = 256):
         super(Continuous, self).__init__()
         
         self.de_pt =  nn.Sequential(
-            nn.Linear(pt_dim + con_dim, 64),
-            nn.BatchNorm1d(64),
-            BottleNect1D(64),
-            nn.Linear(64, latent_dim),
+            nn.Linear(pt_dim + con_dim + latent_dim, latent_dim),
             nn.BatchNorm1d(latent_dim),
             BottleNect1D(latent_dim),
         )
         
         self.de_1 = nn.Sequential(
-            nn.Linear(2*latent_dim, 2*latent_dim),
-            nn.BatchNorm1d(2*latent_dim),
-            BottleNect1D(2*latent_dim),
-            nn.Linear(2*latent_dim, 2*latent_dim),
-            nn.BatchNorm1d(2*latent_dim),
-            BottleNect1D(2*latent_dim),
+            nn.Linear(latent_dim, latent_dim),
+            nn.BatchNorm1d(latent_dim),
+            BottleNect1D(latent_dim),
         )
         
         self.de_2 = nn.Sequential(
-            nn.Linear(4*latent_dim, 2*latent_dim),
-            nn.BatchNorm1d(2*latent_dim),
-            BottleNect1D(2*latent_dim),
-            nn.Linear(2*latent_dim, 2*latent_dim),
-            nn.BatchNorm1d(2*latent_dim),
-            BottleNect1D(2*latent_dim),
-            nn.Linear(2*latent_dim, 1),
+            nn.Linear(latent_dim, latent_dim),
+            nn.BatchNorm1d(latent_dim),
+            BottleNect1D(latent_dim),
+            nn.Linear(latent_dim, 1),
             nn.Tanh(),
         )
         
     def forward(self, pt, con, z):
         
-        cat = torch.cat((self.de_pt(torch.cat((pt, con), 1)), z), 1)
-        out = self.de_1(cat)
-        out = self.de_2(torch.cat((out, cat), 1))
+        fea = self.de_pt(torch.cat((torch.cat((pt, con), 1), z), 1))
+        out = self.de_1(fea) + fea
+        out = self.de_2(out)
         
         return out
         
         
 class Conditional_UNET_FULL(nn.Module):
-    def __init__(self, channel_size = 16, expand = 5):
+    def __init__(self, channel_size = 16, expand = 1):
         super(Conditional_UNET_FULL, self).__init__()
+        
+        self.channel = channel_size
         
         self.down1 = nn.Sequential(
             nn.Conv3d(in_channels = 1, out_channels = 2*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(2*channel_size),
+            nn.ReLU(),
         )
         
         self.down2 = nn.Sequential(
@@ -182,6 +189,7 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*2*channel_size, out_channels = 4*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(4*channel_size),
+            nn.ReLU(),
         )
         
         self.down3 = nn.Sequential(
@@ -191,6 +199,7 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*4*channel_size, out_channels = 8*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(8*channel_size),
+            nn.ReLU(),
         )
         
         self.down4 = nn.Sequential(
@@ -200,6 +209,7 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*8*channel_size, out_channels = 16*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(16*channel_size),
+            nn.ReLU(),
         )
         
         
@@ -209,6 +219,7 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*16*channel_size, out_channels = 16*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(16*channel_size),
+            nn.ReLU(),
             nn.Upsample(scale_factor=8, mode='nearest'),
         )
         
@@ -218,6 +229,7 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*8*channel_size, out_channels = 8*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(8*channel_size),
+            nn.ReLU(),
             nn.Upsample(scale_factor=2, mode='nearest'),
         )
         
@@ -227,6 +239,7 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*4*channel_size, out_channels = 4*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(4*channel_size),
+            nn.ReLU(),
             nn.Upsample(scale_factor=2, mode='nearest'),
         )
         
@@ -236,8 +249,8 @@ class Conditional_UNET_FULL(nn.Module):
             nn.ReLU(),
             nn.Conv3d(in_channels = expand*2*channel_size, out_channels = 2*channel_size, kernel_size = 3, stride=1, padding=1),
             nn.BatchNorm3d(2*channel_size),
-            nn.Conv3d(in_channels = 2*channel_size, out_channels = 1, kernel_size = 3, stride=1, padding=1),
-            nn.Tanh()
+            nn.ReLU(),
+            nn.Conv3d(in_channels = 2*channel_size, out_channels = 3, kernel_size = 3, stride=1, padding=1),
         )
         
     def forward(self, x, z):
@@ -296,3 +309,40 @@ class Conditional_UNET(nn.Module):
         out = self.up4(torch.cat((context1, out), 1))
         
         return out
+
+class Mapping(nn.Module):
+    def __init__(self, latent_dim = 256):
+        super(Mapping, self).__init__()
+        
+        self.mapping = nn.Sequential(
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+            nn.Conv3d(in_channels = latent_dim, out_channels = latent_dim, kernel_size = 1, stride=1, padding=0),
+            nn.BatchNorm3d(latent_dim),
+            nn.ReLU(),
+        )
+        
+    def forward(self, z):
+        
+        z = self.mapping(z)
+        
+        return z
